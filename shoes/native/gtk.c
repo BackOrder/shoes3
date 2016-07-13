@@ -1906,7 +1906,8 @@ shoes_font_list()
 #include <io.h>
 #include <fcntl.h>
 
-// called from main.c(skel) on Windows - works fine
+// called from main.c(skel) on Windows --console works fine -very windows/shoes 
+// legacy. 
 static FILE* shoes_console_out = NULL;
 static FILE* shoes_console_in = NULL;
 
@@ -1936,7 +1937,11 @@ int shoes_win32_console()
     return 1;
 }
 
-// Called by Shoes after ruby/gtk/shoes is initialized and running
+/*
+ *  Move this to gtk-terminal.c 
+ *  
+
+
 int shoes_native_terminal()
 {
 	// has a console been setup by --console flag?
@@ -1954,14 +1959,5 @@ int shoes_native_terminal()
     printf("created win32 console\n");
     return 1;
 }
-#else
-/*
-int shoes_native_console(char *app_path)
-{
-  //printf("init gtk console\n");
-  shoes_native_app_console(app_path);
-  printf("gtk\010k\t console \t\tcreated\n"); //test \b \t in string
-  return 1;
-}
-*/ 
+*/
 #endif
