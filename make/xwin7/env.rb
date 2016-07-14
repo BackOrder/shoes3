@@ -64,12 +64,12 @@ ENV['PKG_CONFIG_PATH'] = "#{ularch}/pkgconfig"
 WINVERSION = "#{APP['VERSION']}-gtk3-32"
 WINFNAME = "#{APPNAME}-#{WINVERSION}"
 
-gtk_extra_list = %w(shoes/native/gtkfixedalt.c shoes/native/gtkentryalt.c
+gtk_extra_list = %w(shoes/console/tesi.c shoes/console/gtk-terminal.c shoes/console/colortab.c 
+               shoes/native/gtkfixedalt.c shoes/native/gtkentryalt.c
                shoes/native/gtkcomboboxtextalt.c shoes/native/gtkbuttonalt.c
                shoes/native/gtkscrolledwindowalt.c shoes/native/gtkprogressbaralt.c)
 file_list = %w{shoes/native/gtk.c shoes/http/rbload.c} + gtk_extra_list + ["shoes/*.c"]
 file_list << "shoes/video/video.c" 
-file_list << "shoes/console/gtk-terminal.c"
 SRC = FileList[*file_list]
 OBJ = SRC.map do |x|
   x.gsub(/\.\w+$/, '.o')

@@ -1866,7 +1866,7 @@ shoes_load_font(const char *filename)
   FcConfig *fc = FcConfigGetCurrent();
   FcBool yay = FcConfigAppFontAddFile(fc, (const FcChar8 *)filename);
   if (yay == FcFalse) {
-     fprintf("failed to add font %s ?\n", filename);
+     fprintf(stderr,"failed to add font %s ?\n", filename);
   }
   // the Shoes api says an array of all fonts is returned. After a 
   // font load, the Shoes fontlist must be updated. Use the much faster
