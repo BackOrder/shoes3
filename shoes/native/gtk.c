@@ -1856,7 +1856,7 @@ shoes_dialog_save_folder(int argc, VALUE *argv, VALUE self)
 /*
  * This is only called when a shoe script uses the font(filename) command
  * so the file name is lacuna.ttf, coolvetica.ttf (Shoes splash or the
- * Shoes manual) or a user supplied font 
+ * Shoes manual) or a user requested font 
 */
 VALUE
 shoes_load_font(const char *filename)
@@ -1906,10 +1906,11 @@ shoes_font_list()
 #include <io.h>
 #include <fcntl.h>
 
-// called from main.c(skel) on Windows --console works fine -very windows/shoes 
-// legacy. 
-static FILE* shoes_console_out = NULL;
-static FILE* shoes_console_in = NULL;
+// called from main.c(skel) on Windows  'shoes.exe --console'
+// which different from choes.exe -w (or cshoes.exe --console)
+// or Shoes.terminal({args}) The latter are in gtk-terminal
+FILE* shoes_legacy_console_out = NULL;
+FILE* shoes_legacy_console_in = NULL;
 
 int shoes_win32_console()
 {
@@ -1932,32 +1933,8 @@ int shoes_win32_console()
     *stdin = *hf_in;
     
     //* stash handles 
-    shoes_console_out = hf_out;
-    shoes_console_in = hf_in;
+    shoes_legacy_console_out = hf_out;
+    shoes_legacy_console_in = hf_in;
     return 1;
 }
-
-/*
- *  Move this to gtk-terminal.c 
- *  
-
-
-int shoes_native_terminal()
-{
-	// has a console been setup by --console flag?
-	if (shoes_console_out == NULL) {
-	  if (shoes_win32_console() == 0) // cshoes.exe can do this
-	     return 1;
-	}
-	// convert the (cached) FILE * for what ruby wants for fd[0], [1]...
-    if (dup2(_fileno(shoes_console_out), 1) == -1)
-      printf("failed dup2 of stdout\n");
-    if (dup2(_fileno(shoes_console_out), 2) == -1)
-      printf("failed dup2 of stderr\n");
-    if (dup2(_fileno(shoes_console_in), 0) == -1)
-      printf("failed dup2 of stdin\n");
-    printf("created win32 console\n");
-    return 1;
-}
-*/
 #endif

@@ -6,18 +6,7 @@
 
 #include "tesi.h"
 #include <gdk/gdkkeysyms.h>
-extern char *colorstrings[];
-/*
- * heavily modified from https://github.com/alanszlosek/tesi/
- * for use in Shoes/Linux
- * 
- * There are some restrictions - there is only one tesiObject because
- * it hooks to stdin/out/err and there's only one of those in a Shoes/Ruby/C 
- * process. 
- *  *
- * We can also switch the gtk_text_view buffer from log like/readline buffer
- * to a legacy buffer (with 80 * 24/25 lines of characters)
-*/
+extern char *colorstrings[]; // in colortab.c
 static struct tesiObject *tobj;
 static GtkWidget *terminal_window;
 static GtkTextView *view;
@@ -30,6 +19,11 @@ static GtkTextMark **begline;
 static GtkTextMark **endline;
 static gboolean saveRaw = FALSE;
 static GString *rawBuffer; 
+#ifdef NO_PTY
+// forward declares - at end of file
+void *terminal_win32_gtk_hook(struct tesiObject *);
+gboolean terminal_win32_gtk_drain(gpointer); // gtk idle/poll callback
+#endif
 
 static gboolean keypress_event(GtkWidget *widget, GdkEventKey *event, gpointer data) {
 	struct tesiObject *tobj = (struct tesiObject*)data;
@@ -483,11 +477,13 @@ void terminal_eraseLine(struct tesiObject *tobj, int startx, int endx, int y) {
   }
 }
 // end of incomplete/untested  functions 
-
+#ifdef USE_PTY
 gboolean g_tesi_handleInput(gpointer data) {
 	tesi_handleInput( (struct tesiObject*) data);
 	return TRUE;
 }
+#else
+#endif
 
 // access to shoes_global_console
 #include "shoes/app.h"
@@ -504,7 +500,7 @@ static gboolean clean(GtkWidget *widget, GdkEvent *event, gpointer data) {
   return FALSE;
 }
 
-#ifdef USE_PTY // Linux only. Debug only. TODO !! 
+#if defined(USE_PTY) || defined(NO_PTY)  // GTK only.
 // callback for raw capture
 static void terminal_raw (struct tesiObject *tobj, char *raw, int len) 
 {
@@ -659,7 +655,7 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
   t->callback_insertLines = NULL; //&console_insertLine;
   t->callback_eraseLine = &terminal_eraseLine;
   t->callback_scrollUp = NULL; // &console_scrollUp;
-#ifdef USE_PTY // Linux only
+#if defined(USE_PTY) || defined(NO_PTY) // Gtk (Linux, Windows) only
   t->callback_rawCapture = &terminal_raw; //debugging -remove it later!!
 #endif
   
@@ -671,7 +667,13 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
   g_signal_connect (G_OBJECT (rawbtn), "clicked", G_CALLBACK (raw_copy), t);  
   
   gtk_widget_grab_focus(canvas);
+#ifdef USE_PTY
   unsigned int ides = g_timeout_add(100, &g_tesi_handleInput, t);
+#else // NO_PTY aka Windows/GTK3
+  // only the beginning of fun: Remember we don't use Ruby integration
+  t->win_bridge = (void *)terminal_win32_gtk_hook(t);
+  unsigned int ides = g_timeout_add(100, &terminal_win32_gtk_drain, t);
+#endif
   t->ides = ides;
 
   gtk_widget_show_all (window);
@@ -684,3 +686,72 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
   return;
 }
 
+#ifdef NO_PTY //aka windows/gtk stuff
+
+/*
+ * Going Weird - need to alloc pipes and redirect stdin/out/err
+ * then we need to poll (stdout,stderr) and call tesiHandleInput 
+ * which callback into all kinds of places. 
+ * 
+ * going to use gio_channels and fd's and hope for the best
+ * 
+ * NOTE: mingw and gtk differ from MSFT documentation for C layers
+ * Be careful out there.
+*/
+#include <stdlib.h>
+extern FILE* shoes_legacy_console_out;
+extern FILE* shoes_legacy_console_in;
+struct  win32_bridge {
+  int poll_fds[2];
+  GIOChannel *gchan[2];
+};
+
+void *terminal_win32_gtk_hook(struct tesiObject *tobj) {
+
+	// has a legacy console been setup by --console flag?
+	if (shoes_legacy_console_out == NULL) {
+    // close existing FILE * for stdin/out/err?
+  }
+  int sz = sizeof(struct  win32_bridge);
+  struct  win32_bridge *win_bridge = g_malloc(sz);
+  int outfd[2]; // stdout [0] is read end of pipe, [1] is write end
+  int err;
+  err = pipe(outfd);
+  // set pipe write end to be stdout and stderr
+  err = dup2(outfd[1], 1);
+  err = dup2(outfd[1], 2);
+  // pipe read end is a gio_channel ?. Something we can poll? 
+  win_bridge->poll_fds[0] = outfd[0];
+  win_bridge->gchan[1] = g_io_channel_win32_new_fd(outfd[0]);
+  
+  // key strokes will be written to tobj->fd_input - need a pipe!
+  // but we dont poll it. Readline or similar Ruby things might. 
+  int infd[2];
+  err =  pipe(infd); 
+  err =  dup2(infd[0], 0);
+  tobj->fd_input = infd[1];
+  tobj->win_bridge = win_bridge;
+  return (void *) win_bridge;
+}
+
+// This called from the idle loop - *not* optimal (it's a slow timer)
+// when there is data, we pass it to tesi to parse and it calls into
+// the dark places
+gboolean terminal_win32_gtk_drain(gpointer data) {
+  struct tesiObject *tobj = (struct tesiObject *)data;
+  struct win32_bridge *br = (struct win32_bridge *)tobj->win_bridge;
+  gchar buffer[4096];
+  GIOStatus st;
+  gsize real_count;
+  GError *err;
+  st = g_io_channel_read_chars (br->gchan[1],
+                         buffer,
+                         4096,
+                         &real_count,
+                         &err);
+  if (real_count > 0) {
+    tesi_handleInput(tobj, buffer, real_count);
+  }
+  return TRUE;
+}
+#endif

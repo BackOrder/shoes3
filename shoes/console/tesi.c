@@ -74,6 +74,11 @@ int tesi_handleInput(struct tesiObject *to, char *input, int lengthRead) {
 	int i;
 #endif
 	pointer = input;
+#ifdef NO_PTY // windows gtk
+  if (to->callback_rawCapture) {
+    to->callback_rawCapture(to, input, lengthRead);
+  }
+#endif
 	for(i = 0; i < lengthRead; i++, pointer++) {
 		c = *pointer;
 		if(c == 0) { // skip NULL for unicode?
@@ -590,13 +595,17 @@ struct tesiObject* newTesiObject(char *command, int width, int height) {
 #ifdef SHOES_QUARTZ
   setenv("TERM","xterm-256color",1); 
   //setenv("TERM","xterm",1);
+#elif defined(NO_PTY)
+   putenv("TERM=xterm");
 #else
   setenv("TERM","xterm",1); 
 #endif
+  /*
   sprintf(message, "%d", width);
   setenv("COLUMNS", message, 1);
   sprintf(message, "%d", height);
   setenv("LINES", message, 1);
+  */
 	return to;
 }
 /*
