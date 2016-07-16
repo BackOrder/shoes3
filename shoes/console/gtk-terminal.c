@@ -701,9 +701,10 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
 #include <stdlib.h>
 extern FILE* shoes_legacy_console_out;
 extern FILE* shoes_legacy_console_in;
+gboolean terminal_win32_stdout_drain (GIOChannel *channel, GIOCondition cond, gpointer data);
 struct  win32_bridge {
-  int poll_fds[2];
-  GIOChannel *gchan[2];
+  int poll_fds[3];         // 0 is stdin
+  GIOChannel *gchan[3];    // 0 is stdin
 };
 
 void *terminal_win32_gtk_hook(struct tesiObject *tobj) {
@@ -714,32 +715,83 @@ void *terminal_win32_gtk_hook(struct tesiObject *tobj) {
   }
   int sz = sizeof(struct  win32_bridge);
   struct  win32_bridge *win_bridge = g_malloc(sz);
-  int outfd[2]; // stdout [0] is read end of pipe, [1] is write end
+  
+  // setup stdout first
+  int outfd[2]; // outfd[0] is read end of pipe, [1] is write end
   int err;
   err = pipe(outfd);
-  // set pipe write end to be stdout and stderr
+  //HANDLE handle_out = GetStdHandle(STD_OUTPUT_HANDLE);
+  //int hCrt = _open_osfhandle((long) handle_out, _O_TEXT);
+  FILE* hf_out = _fdopen(outfd[1], "w");
+  setvbuf(hf_out, NULL, _IONBF, 1);
+  *stdout = *hf_out;
   err = dup2(outfd[1], 1);
-  err = dup2(outfd[1], 2);
-  // pipe read end is a gio_channel ?. Something we can poll? 
-  win_bridge->poll_fds[0] = outfd[0];
+  // That's the write end of the pipe hook up. read end is a gio_channel 
+  // or possibly our own select() loop if the mainloop doesn't work
+  win_bridge->poll_fds[1] = outfd[0];
   win_bridge->gchan[1] = g_io_channel_win32_new_fd(outfd[0]);
+  g_io_add_watch (win_bridge->gchan[1], G_IO_IN, terminal_win32_stdout_drain, tobj);
+  
+  // stderr looks a lot like stdout but uses the same g_io_channel callback
+  int errfd[2]; // outfd[0] is read end of pipe, [1] is write end
+  err = pipe(errfd);
+  FILE* hf_err = _fdopen(errfd[1], "w");
+  setvbuf(hf_err, NULL, _IONBF, 1);
+  *stderr = *hf_err;
+  err = dup2(errfd[1], 2);
+  // That's the write end of the pipe hook up. read end is a gio_channel 
+  // or possibly our own select() loop if the mainloop doesn't work
+  win_bridge->poll_fds[2] = errfd[0];
+  win_bridge->gchan[2] = g_io_channel_win32_new_fd(errfd[0]);
+  g_io_add_watch (win_bridge->gchan[2], G_IO_IN, terminal_win32_stdout_drain, tobj);
   
   // key strokes will be written to tobj->fd_input - need a pipe!
   // but we dont poll it. Readline or similar Ruby things might. 
   int infd[2];
   err =  pipe(infd); 
+  //HANDLE handle_in = GetStdHandle(STD_INPUT_HANDLE);
+  //hCrt = _open_osfhandle((long) handle_in, _O_TEXT);
+  FILE* hf_in = _fdopen(infd[0], "r");
+  setvbuf(hf_in, NULL, _IONBF, 128);
+  *stdin = *hf_in;
   err =  dup2(infd[0], 0);
   tobj->fd_input = infd[1];
   tobj->win_bridge = win_bridge;
   return (void *) win_bridge;
 }
 
+gboolean terminal_win32_stdout_drain (GIOChannel *channel, GIOCondition cond, gpointer data)
+{
+  gchar *buffer;
+  gsize length;
+  gsize terminator_pos;
+  GError *error = NULL;
+		
+  if (g_io_channel_read_line (channel, &buffer, &length, &terminator_pos, &error) == G_IO_STATUS_ERROR)
+  {
+      g_warning ("Something went wrong");
+  }
+  if (error != NULL)
+  {
+    g_printf (error->message);
+    exit(1);
+  }
+  if (length > 0) {
+    tesi_handleInput(data, buffer, length);
+  }
+  g_free( buffer );
+return TRUE;
+}
+
+
 // This called from the idle loop - *not* optimal (it's a slow timer)
+// g_io_add_watch (channel, G_IO_IN, mycallback, NULL); is interesting.
 // when there is data, we pass it to tesi to parse and it calls into
 // the dark places
 gboolean terminal_win32_gtk_drain(gpointer data) {
   struct tesiObject *tobj = (struct tesiObject *)data;
   struct win32_bridge *br = (struct win32_bridge *)tobj->win_bridge;
+  /*
   gchar buffer[4096];
   GIOStatus st;
   gsize real_count;
@@ -749,9 +801,14 @@ gboolean terminal_win32_gtk_drain(gpointer data) {
                          4096,
                          &real_count,
                          &err);
-  if (real_count > 0) {
-    tesi_handleInput(tobj, buffer, real_count);
+  if (st == G_IO_STATUS_ERROR || err != NULL ) {
+    g_printf (err->message); // which probably can't be seen
+  } else {
+    if (real_count > 0) {
+      tesi_handleInput(tobj, buffer, real_count);
+    }
   }
+  */
   return TRUE;
 }
 #endif
