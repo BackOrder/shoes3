@@ -19,10 +19,16 @@ static GtkTextMark **begline;
 static GtkTextMark **endline;
 static gboolean saveRaw = FALSE;
 static GString *rawBuffer; 
-#ifdef NO_PTY
-// forward declares - at end of file
+// forward declares - real code near end of file
+#if defined(NO_PTY)
+#ifdef SHOES_GTK_WIN32
 void *terminal_win32_gtk_hook(struct tesiObject *);
 gboolean terminal_win32_gtk_drain(gpointer); // gtk idle/poll callback
+#else
+#include <unistd.h>
+#include <string.h>
+void terminal_unix_gtk_hook(struct tesiObject *);
+#endif
 #endif
 
 static gboolean keypress_event(GtkWidget *widget, GdkEventKey *event, gpointer data) {
@@ -669,12 +675,17 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
   gtk_widget_grab_focus(canvas);
 #ifdef USE_PTY
   unsigned int ides = g_timeout_add(100, &g_tesi_handleInput, t);
+  t->ides = ides;
+#elif !defined(SHOES_GTK3_WIN32)
+  // linux
+  terminal_unix_gtk_hook(t); // no timeout
 #else // NO_PTY aka Windows/GTK3
   // only the beginning of fun: Remember we don't use Ruby integration
   t->win_bridge = (void *)terminal_win32_gtk_hook(t);
   unsigned int ides = g_timeout_add(100, &terminal_win32_gtk_drain, t);
-#endif
   t->ides = ides;
+#endif
+
 
   gtk_widget_show_all (window);
   
@@ -698,6 +709,8 @@ void shoes_native_terminal(char *app_dir, int mode, int columns, int rows,
  * NOTE: mingw and gtk differ from MSFT documentation for C layers
  * Be careful out there.
 */
+#ifdef SHOES_GTK_WIN32
+
 #include <stdlib.h>
 extern FILE* shoes_legacy_console_out;
 extern FILE* shoes_legacy_console_in;
@@ -785,30 +798,69 @@ return TRUE;
 
 
 // This called from the idle loop - *not* optimal (it's a slow timer)
-// g_io_add_watch (channel, G_IO_IN, mycallback, NULL); is interesting.
-// when there is data, we pass it to tesi to parse and it calls into
-// the dark places
+// does nothing.
 gboolean terminal_win32_gtk_drain(gpointer data) {
   struct tesiObject *tobj = (struct tesiObject *)data;
   struct win32_bridge *br = (struct win32_bridge *)tobj->win_bridge;
-  /*
-  gchar buffer[4096];
-  GIOStatus st;
-  gsize real_count;
-  GError *err;
-  st = g_io_channel_read_chars (br->gchan[1],
-                         buffer,
-                         4096,
-                         &real_count,
-                         &err);
-  if (st == G_IO_STATUS_ERROR || err != NULL ) {
-    g_printf (err->message); // which probably can't be seen
-  } else {
-    if (real_count > 0) {
-      tesi_handleInput(tobj, buffer, real_count);
-    }
-  }
-  */
+ 
   return TRUE;
 }
+#else // linux 
+gboolean terminal_unix_stdout_drain (GIOChannel *channel, GIOCondition cond, gpointer data);
+struct  unix_bridge {
+  int poll_fds[3];         // 0 is stdin
+  GIOChannel *gchan[3];    // 0 is stdin
+};
+void terminal_unix_gtk_hook(struct tesiObject *tobj) {
+  int sz = sizeof(struct  unix_bridge);
+  struct  unix_bridge *linux_bridge = g_malloc(sz);
+  // setup stdout first
+  int outfd[2]; // outfd[0] is read end of pipe, [1] is write end
+  int err;
+  err = pipe(outfd);
+  FILE* hf_out = fdopen(outfd[1], "w");
+  setvbuf(hf_out, NULL, _IONBF, 1);
+  *stdout = *hf_out;
+  err = dup2(outfd[1], 1);
+  // That's the write end of the pipe hook up. read end is a gio_channel 
+  // or possibly our own select() loop if the mainloop doesn't work
+  linux_bridge->poll_fds[1] = outfd[0];
+  linux_bridge->gchan[1] = g_io_channel_unix_new(outfd[0]);
+  g_io_add_watch (linux_bridge->gchan[1], G_IO_IN, terminal_unix_stdout_drain, tobj);
+  
+  // stderr looks a lot like stdout but uses the same g_io_channel callback
+  int errfd[2]; // outfd[0] is read end of pipe, [1] is write end
+  err = pipe(errfd);
+  FILE* hf_err = fdopen(errfd[1], "w");
+  setvbuf(hf_err, NULL, _IONBF, 1);
+  *stderr = *hf_err;
+  err = dup2(errfd[1], 2);
+  linux_bridge->poll_fds[2] = errfd[0];
+  linux_bridge->gchan[2] = g_io_channel_unix_new(errfd[0]);
+  g_io_add_watch (linux_bridge->gchan[2], G_IO_IN, terminal_unix_stdout_drain, tobj);
+}
+gboolean terminal_unix_stdout_drain (GIOChannel *channel, GIOCondition cond, gpointer data)
+{
+  gchar *buffer;
+  gsize length;
+  gsize terminator_pos;
+  GError *error = NULL;
+		
+  if (g_io_channel_read_line (channel, &buffer, &length, &terminator_pos, &error) == G_IO_STATUS_ERROR)
+  {
+      g_warning ("Something went wrong");
+  }
+  if (error != NULL)
+  {
+    g_printf (error->message);
+    exit(1);
+  }
+  if (length > 0) {
+    tesi_handleInput(data, buffer, length);
+  }
+  g_free( buffer );
+  return TRUE;
+}
+
+#endif
 #endif

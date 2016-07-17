@@ -13,7 +13,8 @@
 #elif defined(SHOES_GTK_WIN32)
 #define NO_PTY
 #else
-#define USE_PTY
+//#define USE_PTY
+#define NO_PTY  // for gtk3 linux testing
 #endif
 
 #if defined(SHOES_QUARTZ) || defined(SHOES_GTK_OSX)
@@ -23,7 +24,7 @@
 extern int posix_openpt(int);   // shut warnings off
 extern int setenv(const char*, const char*, int); // shut warnings off
 #endif
-#if !defined(NO_PTY)
+#if !defined(NO_PTY) 
 #include <utmp.h>
 #include <unistd.h>
 #include <string.h>
@@ -119,9 +120,6 @@ void deleteTesiObject(void*);
 int tesi_handleInput(struct tesiObject*);
 #else
 int tesi_handleInput(struct tesiObject*, char *, int);
-#endif
-#ifdef NO_PTY // gtk3/windows 
-extern int setenv(const char *, const char *, int);
 #endif
 
 #endif //TESI_H

@@ -594,7 +594,6 @@ struct tesiObject* newTesiObject(char *command, int width, int height) {
 
 #ifdef SHOES_QUARTZ
   setenv("TERM","xterm-256color",1); 
-  //setenv("TERM","xterm",1);
 #elif defined(NO_PTY)
    putenv("TERM=xterm");
 #else
