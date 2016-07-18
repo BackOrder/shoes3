@@ -5,6 +5,7 @@ input until you enter 'quit' at the beginning of a line. quit will exit Shoes \n
    button "run loop" do
       Shoes.terminal
       require 'readline'
+      puts "Type below at the prompt"
       Thread.new do
         loop do
           ln = Readline.readline('> ', false)

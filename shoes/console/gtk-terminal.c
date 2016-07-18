@@ -838,7 +838,19 @@ void terminal_unix_gtk_hook(struct tesiObject *tobj) {
   linux_bridge->poll_fds[2] = errfd[0];
   linux_bridge->gchan[2] = g_io_channel_unix_new(errfd[0]);
   g_io_add_watch (linux_bridge->gchan[2], G_IO_IN, terminal_unix_stdout_drain, tobj);
+  
+  // key strokes will be written to tobj->fd_input - need a pipe!
+  // but we dont poll it? Readline or similar Ruby things might. 
+  int infd[2];
+  err =  pipe(infd); 
+  FILE* hf_in = fdopen(infd[0], "r");
+  setvbuf(hf_in, NULL, _IONBF, 128);
+  *stdin = *hf_in;
+  err =  dup2(infd[0], 0);
+  tobj->fd_input = infd[1];
+  tobj->win_bridge = linux_bridge;
 }
+
 gboolean terminal_unix_stdout_drain (GIOChannel *channel, GIOCondition cond, gpointer data)
 {
   gchar *buffer;
